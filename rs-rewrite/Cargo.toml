@@ -1,0 +1,15 @@
+[package]
+name = "rs-rewrite"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+copy_dir = "0.1.3"
+open = "5.0.1"
+regex = "1.10.3"
+
+[profile.release]
+opt-level = 'z'
+lto = true
