@@ -2,7 +2,15 @@ import os
 import subprocess
 import re
 from pathlib import Path
-from distutils.dir_util import copy_tree
+try:
+    from distutils.dir_util import copy_tree
+except ModuleNotFoundError:  # в 3.12 отсутсвует "distutils"
+    # поэтому нам нужно установить "setuptools" (в который и входит "distutils")
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'setuptools'])  
+
+    print('\x1b[36mНеобходимые библиотеки были успешно установлены. Пожалуйста, перезапустите программу.\x1b[0m')
+    input('\x1b[32mНажмите Enter, чтобы закрыть это окно...\x1b[0m')
+    exit()
 
 # Функции для ввода
 def printinf(message = ''):
