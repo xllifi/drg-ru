@@ -16,6 +16,6 @@ jobs:
           # Filename for archive
           filename: ModArchive.zip # default is release.zip
           # Base path for archive files
-          path: /Mod/ # optional, default is .
+          path: /Mod # optional, default is .
           # Working directory before zipping
           directory: / # optional, default is .
