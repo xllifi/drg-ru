@@ -3,6 +3,7 @@ on:
   push:
     paths:
     - 'Mod/*'
+  workflow_dispatch:
 jobs:
   zipcontent:
     name: Zip Mod Content
