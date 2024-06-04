@@ -1,14 +1,15 @@
+name: Zip Mod Content
 on:
   push:
     paths:
     - 'Mod/*'
 jobs:
   zipcontent:
-    name: Zip mod content
+    name: Zip Mod Content
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - name: Archive Release
+      - name: Create Archive
         uses: thedoctor0/zip-release@0.7.6
         with:
           # Filename for archive
