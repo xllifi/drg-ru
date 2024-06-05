@@ -19,3 +19,4 @@ jobs:
           directory: . # optional, default is .
           # Base path for archive files
           path: Mod # optional, default is .
+          artifacts: ModArchive.zip
