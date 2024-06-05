@@ -19,3 +19,8 @@ jobs:
           directory: . # optional, default is .
           # Base path for archive files
           path: Mod # optional, default is 
+      - uses: actions/checkout@v4
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: ./archive.zip
