@@ -14,9 +14,8 @@ jobs:
         uses: thedoctor0/zip-release@0.7.6
         with:
           # Filename for archive
-          filename: ModArchive.zip # default is release.zip
+          filename: /archive.zip # default is release.zip
           # Working directory before zipping
           directory: . # optional, default is .
           # Base path for archive files
-          path: Mod # optional, default is .
-          artifacts: ModArchive.zip
+          path: Mod # optional, default is 
