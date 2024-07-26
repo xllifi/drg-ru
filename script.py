@@ -2,6 +2,7 @@ import os
 import subprocess
 import re
 from pathlib import Path
+import sys
 try:
     from distutils.dir_util import copy_tree
 except ModuleNotFoundError:  # в 3.12 отсутсвует "distutils"
