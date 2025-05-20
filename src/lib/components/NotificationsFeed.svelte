@@ -1,6 +1,6 @@
 <script lang="ts" module>
   import { Trash2, Copy } from "lucide-svelte";
-  import { _, format } from "svelte-i18n";
+  import { _ } from "svelte-i18n";
   import { flip } from "svelte/animate";
   import { fly, slide } from "svelte/transition";
 
@@ -57,7 +57,7 @@
 
   setTimeout(() => {
     createNotification(
-      "error-unknown",
+      "test",
       "verbose text (e.g. error)"
     );
   }, 600);
