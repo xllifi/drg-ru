@@ -1,0 +1,87 @@
+@use './vars.scss' as *;
+@import url(/fonts/inter/inter.css);
+
+* {
+  padding: 0;
+  color: $clr-fg;
+  font-family: Inter;
+  font-size: 14px;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+body {
+  margin: 0;
+  background-color: $clr-bg;
+  height: 100dvh;
+}
+button, a.button {
+  border: none;
+  outline: dashed 2px $clr-bor;
+  outline-offset: -2px;
+  cursor: pointer;
+  background-color: $clr-bg;
+
+  transition:
+    background-color 200ms,
+    outline-style 200ms,
+    outline-color 200ms,
+  ;
+  
+  @media (hover: hover) {
+    &:hover {
+      background-color: color-mix(in srgb, $clr-acc 20%, transparent);
+      outline-style: solid;
+      outline-color: $clr-acc;
+    }
+  }
+  @media (hover: none) {
+    &:active {
+      background-color: color-mix(in srgb, $clr-acc 20%, transparent);
+      outline-style: solid;
+      outline-color: $clr-acc;
+    }
+  }
+}
+
+a {
+  display: inline-block;
+  background-color: $clr-bgl;
+  border-radius: 8px;
+  text-decoration: none;
+  padding: 8px 10px;
+
+  transition: background-color 200ms;
+  
+  @media (hover: hover) {
+    &:hover {
+      background-color: color-mix(in srgb, $clr-acc 40%, transparent);
+    }
+  }
+  @media (hover: none) {
+    &:active {
+      background-color: color-mix(in srgb, $clr-acc 40%, transparent);
+    }
+  }
+}
+
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  border: solid 2px #0000;
+  background-clip: content-box;
+  background-color: #0006;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
+::-webkit-scrollbar-button {
+  width: 4px;
+  height: 4px;
+}
+
+body::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
