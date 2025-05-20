@@ -14,10 +14,7 @@
 
   let notifications: Notification[] = $state([]);
 
-  export function createNotification(
-    messageId: string,
-    verbose?: string
-  ) {
+  export function createNotification(messageId: string, verbose?: string) {
     let minId = -1;
     if (notifications.map((x) => x.id).includes(0)) {
       minId = Math.max(...notifications.map((x) => x.id));
@@ -37,50 +34,59 @@
 
   function close(e: Event) {
     const el = e.target as HTMLButtonElement;
-    const id = parseInt(el.id.replace("close", ""))
-    removeNotification(id)
+    const id = parseInt(el.id.replace("close", ""));
+    removeNotification(id);
   }
 
   function copy(notification: Notification) {
-    navigator.clipboard.writeText(`${notification.title}\n${notification.description}` + (notification.verbose ? `\n\nVerbose:\n${notification.verbose}` : ''))
+    navigator.clipboard.writeText(
+      `${notification.title}\n${notification.description}` +
+        (notification.verbose ? `\n\nVerbose:\n${notification.verbose}` : "")
+    );
   }
 
   function removeNotification(id: number) {
-    const index = notifications.findIndex(x => x.id == id)
+    const index = notifications.findIndex((x) => x.id == id);
     if (!index && index != 0) {
-      throw `Couldn't find notification id ${id}`
+      throw `Couldn't find notification id ${id}`;
     }
-    notifications.splice(index, 1)
+    notifications.splice(index, 1);
     // So Svelte updates it
-    notifications = notifications
+    notifications = notifications;
   }
 
   setTimeout(() => {
-    createNotification(
-      "test",
-      "verbose text (e.g. error)"
-    );
+    createNotification("test");
   }, 600);
 </script>
 
 <div class="statusfeed">
   <div class="box">
-    {#each notifications as notification (notification.id)}
-      <div class="notification" in:fly={{ x: 100, delay: 100, duration: 200 }} out:fly={{ x: 100, duration: 100 }} animate:flip={{ duration: 200 }}>
+    {#each notifications as n (n.id)}
+      <div
+        class="notification"
+        in:fly={{ x: 100, delay: 100, duration: 200 }}
+        out:fly={{ x: 100, duration: 100 }}
+        animate:flip={{ duration: 200 }}
+      >
         <div class="title">
-          <h2>{$_(notification.title)}</h2>
+          <h2>{$_(n.title)}</h2>
           <span class="empty"></span>
-          <button onclick={() => copy(notification)}><Copy /></button>
-          <button onclick={close} id="close{notification.id}"><Trash2 /></button>
+          <button onclick={() => copy(n)}><Copy /></button>
+          <button onclick={close} id="close{n.id}"><Trash2 /></button>
         </div>
-        <p>{$_(notification.description)}</p>
-        <button class="toggle_verbose" onclick={(e: Event) => {
-          notification.showVerbose = !notification.showVerbose
-        }}>{$_('noti.base.verbose')}</button>
-        {#if notification.showVerbose}
-          <div class="verbose" transition:slide>
-            <span>{notification.verbose}</span>
-          </div>
+        <p>{$_(n.description)}</p>
+        {#if n.verbose}
+          <button
+            class="toggle_verbose"
+            onclick={() => (n.showVerbose = !n.showVerbose)}
+            >{$_("noti.base.verbose")}</button
+          >
+          {#if n.showVerbose}
+            <div class="verbose" transition:slide>
+              <span>{n.verbose}</span>
+            </div>
+          {/if}
         {/if}
       </div>
     {/each}
@@ -102,7 +108,7 @@
     display: flex;
     flex-direction: column-reverse;
     padding: 8px 0;
-    
+
     filter: drop-shadow(0 2px 4px #0006);
 
     pointer-events: none;
@@ -122,7 +128,7 @@
       min-height: min-content;
       gap: 8px;
       padding-right: 8px;
-      
+
       pointer-events: auto;
 
       div.notification {
@@ -151,7 +157,7 @@
           span.empty {
             flex-grow: 1;
           }
-          
+
           h2 {
             padding: 8px 0;
             margin: 0;
