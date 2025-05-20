@@ -15,7 +15,9 @@ body {
 }
 button, a.button {
   border: none;
-  outline: dashed 2px $clr-bor;
+  outline: solid 2px $clr-bor;
+  padding: 4px 8px;
+  border-radius: 8px;
   outline-offset: -2px;
   cursor: pointer;
   background-color: $clr-bg;
