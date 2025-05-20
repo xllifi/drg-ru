@@ -1,85 +1,119 @@
 <script lang="ts">
-  import StatusFeed, { createNotification } from "$lib/components/NotificationsFeed.svelte";
-  import { path } from "@tauri-apps/api";
+  import StatusFeed, {
+    createNotification,
+  } from "$lib/components/NotificationsFeed.svelte";
   import { Channel, invoke } from "@tauri-apps/api/core";
   import { _ } from "svelte-i18n";
 
   let game_path = $state("");
-  let paks_path = $derived(game_path.replace(/[/\\]*$/gm, "") + "/FSD/Content/Paks");
-  let percent = $state(0)
+  let paks_path = $derived(
+    game_path.replace(/[/\\]*$/gm, "").replaceAll("\\", "/") +
+      "/FSD/Content/Paks"
+  );
+  let percent = $state(0);
 
-  let isError: boolean = $state(false)
-  let error: string = $state("")
+  // TODO: make it so multiple same tasks can't be ran
+  let tasks = $state([]);
 
   type ProgressEvent = {
     current: number;
     total: number;
   };
-  
-  const onEvent = new Channel<ProgressEvent>();
-  onEvent.onmessage = (message) => {
-    percent = Math.min(Math.max(message.current / message.total * 100, 0), 100)
-    console.log(`${message.current}/${message.total} (${percent})`);
-  };
 
-  async function unpack(event: Event) {
-    event.preventDefault();
+  function getOnEvent(): Channel<ProgressEvent> {
+    const onEvent = new Channel<ProgressEvent>();
+    onEvent.onmessage = (message) => {
+      percent = Math.min(
+        Math.max((message.current / message.total) * 100, 0),
+        100
+      );
+      console.log(`${message.current}/${message.total} (${percent})`);
+    };
+    return onEvent
+  }
+
+  function clearPercent() {
+    percent = 100
+    setTimeout(() => {
+      percent = 0
+    }, 500);
+  }
+
+  function checkPath(): boolean {
+    if (game_path == "") {
+      createNotification("error-nopath");
+      return false;
+    }
+    return true;
+  }
+
+  async function download(e: Event) {
+    e.preventDefault();
+    if (!checkPath()) return;
+
+    invoke("download", {
+      archiveUrl: `https://github.com/xllifi/drg-ru/raw/refs/heads/rust/mod_archive/mod_archive.zip`,
+      outDirPath: `${paks_path}/temp/mod`,
+      onEvent: getOnEvent(), // TODO: Does nothing currently, blocked by download command not reporting progress
+    }).finally(clearPercent);
+  }
+
+  async function unpack(e: Event) {
+    e.preventDefault();
+    if (!checkPath()) return;
 
     invoke("unpack", {
       inPakPath: `${paks_path}/FSD-WindowsNoEditor.pak`,
-      outDirPath: `${paks_path}/temp`,
-      onEvent,
-    });
-  }
-  
-  async function insert(event: Event) {
-    event.preventDefault();
-
-    invoke("insert", {
-      inPakPath: `${paks_path}/FSD-WindowsNoEditor.pak`,
-      outDirPath: `${paks_path}/temp`,
-      onEvent,
-    });
-  }
-  
-  async function repack(event: Event) {
-    event.preventDefault();
-
-    invoke("unpack", {
-      inPakPath: `${paks_path}/FSD-WindowsNoEditor.pak`,
-      outDirPath: `${paks_path}/temp`,
-      onEvent,
-    });
+      outDirPath: `${paks_path}/temp/unpacked`,
+      onEvent: getOnEvent(),
+    }).finally(clearPercent);
   }
 
+  async function insert(e: Event) {
+    e.preventDefault();
+    if (!checkPath()) return;
+
+    invoke("insert_files", {
+      inDirPath: `${paks_path}/temp/mod`,
+      outDirPath: `${paks_path}/temp/unpacked`,
+      onEvent: getOnEvent(),
+    }).finally(clearPercent);
+  }
+
+  async function repack(e: Event) {
+    e.preventDefault();
+    if (!checkPath()) return;
+
+    invoke("repack", {
+      inDirPath: `${paks_path}/temp/unpacked`,
+      outPakPath: `${paks_path}/FSD-WindowsNoEditor.pak`,
+      onEvent: getOnEvent(),
+    }).finally(clearPercent);
+  }
+
+  // TODO: handle `AppError`s properly
   function onunhandledrejection(e: any) {
-    console.log(e)
-    console.log(e.reason)
-    createNotification('error-unknown', e.reason);
+    createNotification("error-unknown", e.reason);
   }
 
-  $inspect(console.log(error))
+  $effect(() => {
+    console.log(game_path);
+  });
 </script>
 
 <svelte:window {onunhandledrejection} />
 
 <main class="container">
   <p>{paks_path}</p>
-  {#if isError}
-    <span class="error">error: {error}</span>
-  {/if}
-  <button onclick={unpack}>Download</button>
-  
-  <!-- Temporary divider -->
-  <p> </p>
 
   <input placeholder="Game path" bind:value={game_path} />
   <div class="row">
+    <button onclick={download}>Download</button>
     <button onclick={unpack}>Unpack</button>
-    <button >Insert</button>
-    <button >Repack</button>
+    <button onclick={insert}>Insert</button>
+    <button onclick={repack}>Repack</button>
   </div>
-  
+
   <span
     style="
     --percent: {percent}%;
@@ -110,6 +144,14 @@
     -webkit-text-size-adjust: 100%;
   }
 
+  input {
+    background-color: $clr-bgl;
+    border: none;
+    outline: solid 2px $clr-bor;
+    outline-offset: -2px;
+    padding: 4px;
+  }
+
   main {
     height: 100%;
     width: 100%;
@@ -127,7 +169,11 @@
     .progressbar {
       width: 100%;
       height: 32px;
-      background: linear-gradient(to right, red var(--percent), black var(--percent));
+      background: linear-gradient(
+        to right,
+        red var(--percent),
+        black var(--percent)
+      );
     }
   }
 </style>

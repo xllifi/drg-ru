@@ -1,6 +1,8 @@
 use std::{
-  fs::{self, File},
-  io::{self, BufReader, BufWriter},
+  error::Error,
+  fmt::Display,
+  fs::{self, create_dir_all, File},
+  io::{self, BufReader, BufWriter, Cursor},
   path::{Path, PathBuf},
   sync::{
     atomic::{AtomicU32, Ordering},
@@ -13,15 +15,45 @@ use rayon::{
   iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator},
   ThreadPoolBuilder,
 };
-use regex::Regex;
 use repak::{Compression, Version};
 use serde::Serialize;
 use tauri::ipc::Channel;
+use zip_extract::extract;
 
-// TODO: add downloading mod files
+// TODO: refactor to use streams for progress reporting
+#[tauri::command]
+async fn download(archive_url: String, out_dir_path: String) -> Result<(), AppError> {
+  let out_dir_path = Path::new(&out_dir_path);
+  if !out_dir_path.exists() {
+    create_dir_all(out_dir_path).map_err(|e| AppError::unknown(format!("Failed to create output directory: {e}")))?;
+  }
 
-async fn download() {
-  
+  // Download mod archive
+  let resp = reqwest::get(archive_url).await.map_err(|e| AppError::unknown(format!("HTTP Request failed: {e}")))?;
+
+  // Ensure is zip
+  if !resp
+    .headers()
+    .iter()
+    .any(|x| x.0.as_str() == "content-type" && x.1.to_str().unwrap_or("") == "application/zip")
+  {
+    return Err(AppError {
+      message: "Downloaded file is not a zip! (at least according to headers)".into(),
+      cause: Causes::DownloadNotZip,
+    });
+  }
+
+  let body = resp.bytes().await.map_err(|e| AppError::unknown(format!("HTTP Request's body is invalid: {e}")))?;
+
+  // Unpack mod archive
+  extract(
+    Cursor::new(body),
+    Path::new(&out_dir_path),
+    false,
+  )
+  .map_err(|e| AppError::unknown(format!("Failed to unzip archive: {e}")))?;
+
+  Ok(())
 }
 
 #[tauri::command]
@@ -78,6 +110,7 @@ async fn unpack(
             .send(ProgressEvent {
               current,
               total: length.clone(),
+              task: Tasks::UnpackGame,
             })
             .map_err(|e| format!("{e}"))?;
         }
@@ -106,45 +139,38 @@ async fn insert_files(
   in_dir_path: String,
   out_dir_path: String,
   on_event: Channel<ProgressEvent>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
   let mut in_file_paths = vec![];
-  collect_files(&mut in_file_paths, Path::new(&in_dir_path)).map_err(|err| format!("{err}"))?;
-
-  let re = Regex::new(r"\./run/in").map_err(|err| format!("{err}"))?;
+  collect_files(&mut in_file_paths, Path::new(&in_dir_path)).map_err(|err| AppError::unknown(format!("{err}")))?;
 
   let current = Arc::new(AtomicU32::new(0));
   let length = in_file_paths.len() as u32;
 
   in_file_paths
     .par_iter()
-    .try_for_each(|file_path| -> Result<(), String> {
+    .try_for_each(|file_path| -> Result<(), AppError> {
       if file_path.is_dir() {
         return Ok(());
       }
       let current = current.fetch_add(1, Ordering::SeqCst);
-      if current % 64 == 0 {
-        on_event
-          .send(ProgressEvent {
-            current,
-            total: length.clone(),
-          })
-          .map_err(|e| format!("{e}"))?;
-      }
+      on_event
+        .send(ProgressEvent {
+          current,
+          total: length.clone(),
+          task: Tasks::InsertFiles,
+        })
+        .map_err(|e| AppError::unknown(format!("{e}")))?;
 
-      let dirless_path = re.replace(
-        file_path
-          .to_str()
-          .ok_or("failed to convert path to string")?,
-        "",
-      );
+      let dirless_path = file_path.to_str().ok_or(AppError::unknown("Failed to convert path to string"))?.replace(&in_dir_path, "");
+      let dirless_path = Path::new(&dirless_path).to_slash().ok_or(AppError::unknown("Failed to convert path's slashes"))?;
 
       let in_full = PathBuf::from(format!("{}{}", &in_dir_path, &dirless_path));
       let out_full = PathBuf::from(format!("{}{}", &out_dir_path, &dirless_path));
 
       if let Some(parent) = out_full.parent() {
-        fs::create_dir_all(parent).map_err(|err| format!("{err}"))?;
+        fs::create_dir_all(parent).map_err(|err| AppError::unknown(format!("{err}")))?;
       }
-      fs::copy(in_full, out_full).map_err(|err| format!("{err}"))?;
+      fs::copy(in_full, out_full).map_err(|err| AppError::unknown(format!("{err}")))?;
 
       Ok(())
     })?;
@@ -161,6 +187,16 @@ async fn repack(
   let input_path = Path::new(&in_dir_path);
   if !input_path.is_dir() {
     return Err("Not a directory!".into());
+  }
+
+  let out_pak_path = Path::new(&out_pak_path);
+
+  if out_pak_path.exists() {
+    fs::rename(
+      out_pak_path,
+      out_pak_path.to_str()
+        .ok_or("Failed to convert path to string")?.to_string() + ".backup"
+    ).map_err(|e| format!("Failed to rename original file to backup: {e}"))?;
   }
 
   let mut paths = vec![];
@@ -203,6 +239,7 @@ async fn repack(
                 .send(ProgressEvent {
                   current,
                   total: length.clone(),
+                  task: Tasks::RepackGame,
                 })
                 .map_err(|e| repak::Error::Other(format!("{e}")))?;
             }
@@ -225,7 +262,7 @@ async fn repack(
 
   pak.write_index().map_err(|err| format!("{err}"))?;
 
-  println!("Packed {} files to {}", paths.len(), out_pak_path);
+  println!("Packed {} files to {:?}", paths.len(), out_pak_path);
 
   Ok(())
 }
@@ -239,7 +276,12 @@ pub fn run() {
 
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
-    .invoke_handler(tauri::generate_handler![unpack, insert_files, repack])
+    .invoke_handler(tauri::generate_handler![
+      download,
+      unpack,
+      insert_files,
+      repack
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
@@ -262,4 +304,44 @@ fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
 struct ProgressEvent {
   current: u32,
   total: u32,
+  task: Tasks
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Tasks {
+  DownloadMod,
+  UnzipMod,
+  UnpackGame,
+  InsertFiles,
+  RepackGame,
+}
+
+#[derive(Debug, Serialize)]
+struct AppError {
+  message: String,
+  cause: Causes,
+}
+
+impl AppError {
+  pub fn unknown<S: Into<String>>(message: S) -> AppError {
+    AppError {
+      message: message.into(),
+      cause: Causes::Unknown
+    }
+  }
+}
+
+impl Display for AppError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.message)
+  }
+}
+
+impl Error for AppError {}
+
+#[derive(Debug, Serialize)]
+enum Causes {
+  Unknown,
+  DownloadNotZip,
 }
