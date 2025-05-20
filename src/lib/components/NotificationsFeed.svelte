@@ -171,6 +171,7 @@
             border-radius: 4px;
             outline: none;
             opacity: 0.4;
+            padding: 0;
 
             transition: opacity 200ms;
 
@@ -186,10 +187,6 @@
         }
         p {
           margin: 0;
-        }
-        > button {
-          padding: 4px 8px;
-          border-radius: 8px;
         }
         .verbose {
           background-color: $clr-bg;
