@@ -1,7 +1,4 @@
-# Tauri + SvelteKit + TypeScript
+# drg-ru
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
-
-## Recommended IDE Setup
-
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+Новая версия сейчас в разработке. Она функциональна, но UI/UX ещё нужно доработать.
+Если вы хотите установить шрифт прямо сейчас, используйте [оригинальное исполнение на python](https://github.com/xllifi/drg-ru/tree/python)
