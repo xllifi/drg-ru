@@ -5,11 +5,12 @@ use std::{
   io::{self, BufReader, BufWriter, Cursor},
   path::{Path, PathBuf},
   sync::{
-    atomic::{AtomicU32, Ordering},
+    atomic::{AtomicU64, Ordering},
     Arc,
   },
 };
 
+use futures::StreamExt;
 use path_slash::PathExt;
 use rayon::{
   iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator},
@@ -22,14 +23,24 @@ use zip_extract::extract;
 
 // TODO: refactor to use streams for progress reporting
 #[tauri::command]
-async fn download(archive_url: String, out_dir_path: String) -> Result<(), AppError> {
+async fn download(
+  archive_url: String,
+  out_dir_path: String,
+  on_event: Channel<ProgressEvent>,
+) -> Result<(), AppError> {
   let out_dir_path = Path::new(&out_dir_path);
   if !out_dir_path.exists() {
-    create_dir_all(out_dir_path).map_err(|e| AppError::unknown(format!("Failed to create output directory: {e}")))?;
+    create_dir_all(out_dir_path)
+      .map_err(|e| AppError {
+        message: format!("Failed to create output directory: {e}"),
+        cause: Causes::FsError
+      })?;
   }
 
   // Download mod archive
-  let resp = reqwest::get(archive_url).await.map_err(|e| AppError::unknown(format!("HTTP Request failed: {e}")))?;
+  let resp = reqwest::get(archive_url)
+    .await
+    .map_err(|e| AppError::unknown(format!("HTTP Request failed: {e}")))?;
 
   // Ensure is zip
   if !resp
@@ -43,15 +54,40 @@ async fn download(archive_url: String, out_dir_path: String) -> Result<(), AppEr
     });
   }
 
-  let body = resp.bytes().await.map_err(|e| AppError::unknown(format!("HTTP Request's body is invalid: {e}")))?;
+  let total_size = resp.content_length().unwrap_or(0);
+  let mut downloaded: u64 = 0;
+
+  let mut stream = resp.bytes_stream();
+  let mut buffer: Vec<u8> = vec![];
+
+  while let Some(item) = stream.next().await {
+    let chunk = item.or(Err(AppError::unknown("Failed to download archive")))?;
+    buffer.append(&mut chunk.to_vec());
+    downloaded += chunk.len() as u64;
+    println!("{}/{}", downloaded, total_size);
+    on_event
+      .send(ProgressEvent::Progress {
+        current: downloaded,
+        total: total_size,
+        task: Tasks::DownloadMod,
+      })
+      .map_err(|e| AppError {
+        message: format!("Failed to send progress data: {e}"),
+        cause: Causes::ChannelSendFailed,
+      })?;
+  }
+  on_event
+    .send(ProgressEvent::Finished {
+      task: Tasks::DownloadMod,
+    })
+    .map_err(|e| AppError {
+      message: format!("Failed to send progress data: {e}"),
+      cause: Causes::ChannelSendFailed,
+    })?;
 
   // Unpack mod archive
-  extract(
-    Cursor::new(body),
-    Path::new(&out_dir_path),
-    false,
-  )
-  .map_err(|e| AppError::unknown(format!("Failed to unzip archive: {e}")))?;
+  extract(Cursor::new(buffer), Path::new(&out_dir_path), false)
+    .map_err(|e| AppError::unknown(format!("Failed to unzip archive: {e}")))?;
 
   Ok(())
 }
@@ -61,23 +97,30 @@ async fn unpack(
   in_pak_path: String,
   out_dir_path: String,
   on_event: Channel<ProgressEvent>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
   let path = PathBuf::from(&in_pak_path);
   println!("{:?}", path);
-  let file = File::open(&path).map_err(|err| format!("{err}"))?;
+  let file = File::open(&path)
+  .map_err(|e| AppError {
+      message: format!("Failed to open file: {e}"),
+      cause: Causes::FsError,
+    })?;
   let mut reader = BufReader::new(&file);
 
   let builder = repak::PakBuilder::new();
   let pak = builder
     .reader(&mut reader)
-    .map_err(|err| format!("{err}"))?;
+    .map_err(|e| AppError::unknown(format!("Failed to read pak: {e}")))?;
 
   match fs::create_dir(&out_dir_path) {
     Ok(_) => Ok(()),
     Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
     Err(e) => Err(e),
   }
-  .map_err(|err| format!("{err}"))?;
+  .map_err(|e| AppError {
+    message: format!("Failed to create output directory: {e}"),
+    cause: Causes::FsError,
+  })?;
 
   struct UnpackEntry {
     entry_path: String,
@@ -96,40 +139,56 @@ async fn unpack(
     }
   });
 
-  let current = Arc::new(AtomicU32::new(0));
-  let length = entries.len() as u32;
+  let current = Arc::new(AtomicU64::new(0));
+  let length = entries.len() as u64;
 
   entries
     .par_bridge()
     .try_for_each_init(
       || File::open(&in_pak_path),
-      |file, entry| -> Result<(), String> {
+      |file, entry| -> Result<(), AppError> {
         let current = current.fetch_add(1, Ordering::SeqCst);
         if current % 64 == 0 {
           on_event
-            .send(ProgressEvent {
+            .send(ProgressEvent::Progress {
               current,
               total: length.clone(),
               task: Tasks::UnpackGame,
             })
-            .map_err(|e| format!("{e}"))?;
+            .map_err(|e| AppError {
+              message: format!("Failed to send progress data: {e}"),
+              cause: Causes::ChannelSendFailed,
+            })?;
         }
 
-        fs::create_dir_all(&entry.out_dir).map_err(|e| format!("{e}"))?;
+        fs::create_dir_all(&entry.out_dir).map_err(|e| AppError {
+          message: format!("Failed to create output directory: {e}"),
+          cause: Causes::FsError,
+        })?;
         pak
           .read_file(
             &entry.entry_path,
             &mut BufReader::new(
               file
                 .as_ref()
-                .map_err(|e| format!("error reading pak: {e}"))?,
+                .map_err(|e| AppError::unknown(format!("Failed to read pak: {e}")))?,
             ),
-            &mut File::create(&entry.out_path).map_err(|e| format!("{e}"))?,
+            &mut File::create(&entry.out_path).map_err(|e| AppError {
+              message: format!("Failed to create file: {e}"),
+              cause: Causes::FsError
+            })?,
           )
-          .map_err(|e| format!("{e}"))
+          .map_err(|e| AppError::unknown(format!("{e}")))
       },
-    )
-    .map_err(|err| format!("{err}"))?;
+    )?;
+  on_event
+    .send(ProgressEvent::Finished {
+      task: Tasks::UnpackGame,
+    })
+    .map_err(|e| AppError {
+      message: format!("Failed to send progress data: {e}"),
+      cause: Causes::ChannelSendFailed,
+    })?;
 
   Ok(())
 }
@@ -141,10 +200,11 @@ async fn insert_files(
   on_event: Channel<ProgressEvent>,
 ) -> Result<(), AppError> {
   let mut in_file_paths = vec![];
-  collect_files(&mut in_file_paths, Path::new(&in_dir_path)).map_err(|err| AppError::unknown(format!("{err}")))?;
+  collect_files(&mut in_file_paths, Path::new(&in_dir_path))
+    .map_err(|err| AppError::unknown(format!("{err}")))?;
 
-  let current = Arc::new(AtomicU32::new(0));
-  let length = in_file_paths.len() as u32;
+  let current = Arc::new(AtomicU64::new(0));
+  let length = in_file_paths.len() as u64;
 
   in_file_paths
     .par_iter()
@@ -154,15 +214,20 @@ async fn insert_files(
       }
       let current = current.fetch_add(1, Ordering::SeqCst);
       on_event
-        .send(ProgressEvent {
+        .send(ProgressEvent::Progress {
           current,
           total: length.clone(),
           task: Tasks::InsertFiles,
         })
         .map_err(|e| AppError::unknown(format!("{e}")))?;
 
-      let dirless_path = file_path.to_str().ok_or(AppError::unknown("Failed to convert path to string"))?.replace(&in_dir_path, "");
-      let dirless_path = Path::new(&dirless_path).to_slash().ok_or(AppError::unknown("Failed to convert path's slashes"))?;
+      let dirless_path = file_path
+        .to_str()
+        .ok_or(AppError::unknown("Failed to convert path to string"))?
+        .replace(&in_dir_path, "");
+      let dirless_path = Path::new(&dirless_path)
+        .to_slash()
+        .ok_or(AppError::unknown("Failed to convert path's slashes"))?;
 
       let in_full = PathBuf::from(format!("{}{}", &in_dir_path, &dirless_path));
       let out_full = PathBuf::from(format!("{}{}", &out_dir_path, &dirless_path));
@@ -174,6 +239,14 @@ async fn insert_files(
 
       Ok(())
     })?;
+  on_event
+    .send(ProgressEvent::Finished {
+      task: Tasks::InsertFiles,
+    })
+    .map_err(|e| AppError {
+      message: format!("Failed to send progress data: {e}"),
+      cause: Causes::ChannelSendFailed,
+    })?;
 
   Ok(())
 }
@@ -183,10 +256,10 @@ async fn repack(
   in_dir_path: String,
   out_pak_path: String,
   on_event: Channel<ProgressEvent>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
   let input_path = Path::new(&in_dir_path);
   if !input_path.is_dir() {
-    return Err("Not a directory!".into());
+    return Err(AppError::unknown("Not a directory!"));
   }
 
   let out_pak_path = Path::new(&out_pak_path);
@@ -194,18 +267,28 @@ async fn repack(
   if out_pak_path.exists() {
     fs::rename(
       out_pak_path,
-      out_pak_path.to_str()
-        .ok_or("Failed to convert path to string")?.to_string() + ".backup"
-    ).map_err(|e| format!("Failed to rename original file to backup: {e}"))?;
+      out_pak_path
+        .to_str()
+        .ok_or(AppError::unknown("Failed to convert path to string"))?
+        .to_string()
+        + ".backup",
+    )
+    .map_err(|e| AppError {
+      message: format!("Failed to rename original file to backup: {e}"),
+      cause: Causes::FsError
+    })?;
   }
 
   let mut paths = vec![];
-  collect_files(&mut paths, &input_path).map_err(|err| format!("{err}"))?;
+  collect_files(&mut paths, &input_path).map_err(|e| AppError {
+    message: format!("Failed to read files from directory: {e}"),
+    cause: Causes::FsError
+  })?;
 
   let mut pak = repak::PakBuilder::new()
     .compression(Some(Compression::Zlib))
     .writer(
-      BufWriter::new(File::create(&out_pak_path).map_err(|err| format!("{err}"))?),
+      BufWriter::new(File::create(&out_pak_path).map_err(|err| AppError::unknown(format!("{err}")))?),
       Version::V11,
       "../../../".into(),
       None,
@@ -213,11 +296,12 @@ async fn repack(
 
   let iter = paths.iter();
 
-  let current = Arc::new(AtomicU32::new(0));
-  let length = iter.len() as u32;
+  let current = Arc::new(AtomicU64::new(0));
+  let length = iter.len() as u64;
 
   let mut result = None;
   let result_ref = &mut result;
+  let on_event_clone = on_event.clone();
   rayon::in_place_scope(|scope| -> Result<(), repak::Error> {
     let (tx, rx) = std::sync::mpsc::sync_channel(0);
     let entry_builder = pak.entry_builder();
@@ -235,8 +319,8 @@ async fn repack(
 
             let current = current.fetch_add(1, Ordering::SeqCst);
             if current % 64 == 0 {
-              on_event
-                .send(ProgressEvent {
+              on_event_clone
+                .send(ProgressEvent::Progress {
                   current,
                   total: length.clone(),
                   task: Tasks::RepackGame,
@@ -257,10 +341,19 @@ async fn repack(
     }
     Ok(())
   })
-  .map_err(|err| format!("{err}"))?;
-  result.unwrap().map_err(|err| format!("{err}"))?;
+  .map_err(|e| AppError::unknown(format!("{e}")))?;
+  result.unwrap().map_err(|e| AppError::unknown(format!("{e}")))?;
 
-  pak.write_index().map_err(|err| format!("{err}"))?;
+  on_event
+    .send(ProgressEvent::Finished {
+      task: Tasks::DownloadMod,
+    })
+    .map_err(|e| AppError {
+      message: format!("Failed to send progress data: {e}"),
+      cause: Causes::ChannelSendFailed,
+    })?;
+
+  pak.write_index().map_err(|e| AppError::unknown(format!("{e}")))?;
 
   println!("Packed {} files to {:?}", paths.len(), out_pak_path);
 
@@ -300,11 +393,16 @@ fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
 }
 
 #[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event")]
-struct ProgressEvent {
-  current: u32,
-  total: u32,
-  task: Tasks
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "event", content = "data")]
+enum ProgressEvent {
+  Progress {
+    current: u64,
+    total: u64,
+    task: Tasks,
+  },
+  Finished {
+    task: Tasks,
+  },
 }
 
 #[derive(Clone, Serialize)]
@@ -327,7 +425,7 @@ impl AppError {
   pub fn unknown<S: Into<String>>(message: S) -> AppError {
     AppError {
       message: message.into(),
-      cause: Causes::Unknown
+      cause: Causes::Unknown,
     }
   }
 }
@@ -341,7 +439,10 @@ impl Display for AppError {
 impl Error for AppError {}
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum Causes {
   Unknown,
   DownloadNotZip,
+  ChannelSendFailed,
+  FsError,
 }

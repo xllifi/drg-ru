@@ -54,10 +54,6 @@
     // So Svelte updates it
     notifications = notifications;
   }
-
-  setTimeout(() => {
-    createNotification("test");
-  }, 600);
 </script>
 
 <div class="statusfeed">
@@ -109,7 +105,7 @@
     flex-direction: column-reverse;
     padding: 8px 0;
 
-    filter: drop-shadow(0 2px 4px #0006);
+    filter: drop-shadow(0 4px 4px #0006);
 
     pointer-events: none;
 

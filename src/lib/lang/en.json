@@ -1,0 +1,35 @@
+{
+  "noti": {
+    "base": {
+      "verbose": "Verbose"
+    },
+    "messages": {
+      "error-unknown": {
+        "title": "Unknown error!",
+        "description": "No description. See verbose."
+      },
+      "error-nopath": {
+        "title": "Input path!",
+        "description": "You didn't input game path. Input path."
+      }
+    }
+  },
+  "progressbar": {
+    "tasks": {
+      "download_mod": "Downloading mod",
+      "unzip_mod": "Unzipping mod",
+      "unpack_game": "Unpacking game file",
+      "insert_files": "Copying mod file",
+      "repack_game": "Repacking game file"
+    }
+  },
+  "main": {
+    "game_path": "Game path",
+    "buttons": {
+      "download": "Download",
+      "unpack": "Unpack",
+      "insert": "Copy mod files",
+      "repack": "Repack"
+    }
+  }
+}
