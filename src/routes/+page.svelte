@@ -70,6 +70,7 @@
         console.log(`${message.data.current}/${message.data.total}`);
       }
       if (message.event == 'finished') {
+        if (progress) progress.current = progress.total
         if (progressId != null) removeProgress(progressId)
       }
     };
