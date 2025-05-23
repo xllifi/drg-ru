@@ -27,9 +27,4 @@ rayon = "1.10.0"
 repak = { git = "https://github.com/trumank/repak.git", version = "0.2.2" }
 zip-extract = "0.3.0"
 reqwest = { version = "0.12.15", features = ["stream"] }
-async_zip = { version = "0.0.17", features = ["tokio"] }
 futures = { version = "0.3.31", features = ["io-compat"] }
-tokio = { version = "1.45.0", features = ["io-util"] }
-zip = "3.0.0"
-futures-util = "0.3.31"
-thiserror = "2"
